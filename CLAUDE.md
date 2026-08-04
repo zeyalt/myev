@@ -102,12 +102,60 @@ calculations into TypeScript.
   (`charging_sessions` table), only synthesized as a category label in the
   Expenses-by-Category donut.
 - Battery % After Charging < Battery % Before Charging is a HARD-BLOCKED validation
-  error on the entry form (zod `.refine()` in `ChargingEntryForm.tsx`) — not a
+  error on the entry form (zod `.refine()` in `ChargingSessionForm.tsx`) — not a
   soft warning.
-- Charging Location / Provider / Paid By / Payment Method are free-text fields with
-  datalist autocomplete sourced from Neon distinct-value queries
-  (`useDistinctValues` hook) — not managed lookup tables. Matches the source
-  Google Sheet's denormalized approach.
+- Charging Location / Provider are dropdowns ranked by historical frequency
+  (`useValuesByFrequency` hook, case-insensitive dedupe) with an "Other…" free-text
+  fallback (`SelectWithOther.tsx`) — not managed lookup tables, but not raw
+  free-text either. Paid By and Subscription Plan are fixed dropdowns
+  (`PAID_BY_OPTIONS`/`SUBSCRIPTION_PLANS` in `constants.ts`), also with "Other…"
+  for the subscription plan. Payment Method (other_expenses only) remains
+  free-text + datalist via `useDistinctValues`.
+
+## Charging sessions are entered in two phases (editable records)
+Real-world usage: at plug-in time you only know *some* fields; the rest (kWh,
+final battery %, cost, etc.) are only known once charging ends. So charging
+sessions support partial creation + later editing — **this applies only to
+`charging_sessions`; `other_expenses` stays insert/select-only, entered complete
+in one go.**
+- **Nullable-until-known columns** (`neon/01_tables.sql`, and
+  `neon/04_editable_sessions.sql` for pre-existing databases): `end_at`, `kwh`,
+  `batt_after_pct`, `cost`, `currency`, `paid_by`. Everything else (start_at,
+  odometer_km, batt_before_pct, country, charging_type, location, provider,
+  subscription_plan) is required at creation — these are exactly the fields
+  knowable before charging begins.
+- `src/lib/types.ts`'s `isCompleteSession()` is the single source of truth for
+  "is this session fully filled in" (all six nullable fields present). It's a
+  TS type guard, narrowing to `CompleteChargingSessionRow`.
+- **`deriveSessions()` (`derive.ts`) filters to complete sessions only** — an
+  in-progress session has no meaningful cost/duration/energy numbers, so it's
+  invisible to the Dashboard, KPIs, charts, and Insights until completed. This
+  filtering happens transparently inside `deriveSessions`; nothing downstream
+  needs to know about incomplete sessions.
+- **`deriveRecordRows()` (`derive.ts`) preserves every row**, complete or not,
+  with nullable derived fields (`grossCost`/`netCost`/`costPerKwh` are `null`
+  when the inputs aren't known yet) — this feeds the Records page, which is the
+  only place in-progress sessions are visible/editable.
+- **UPDATE and DELETE are granted to the `anonymous` role on `charging_sessions`
+  only** (`neon/02_grants.sql` / `neon/04_editable_sessions.sql`) — `other_expenses`
+  stays insert/select-only, so the worst case of a leaked/guessed endpoint is
+  bounded to editing/deleting charging sessions (recoverable by re-entering data)
+  and spam-inserting expenses, never silently corrupting expense records.
+  The Records page's delete button (last column, per row) uses this grant.
+- `ChargingSessionForm.tsx` is a single component for both flows: `mode="create"`
+  (quick-start, only the upfront fields shown, `INSERT`) and `mode="edit"`
+  (every field shown, pre-filled from the existing row via `recordToDefaults()`,
+  full-row `UPDATE`). Editing always resubmits the complete resolved row (not a
+  sparse patch) — simpler to reason about, and safe since the form is always
+  fully pre-filled from current DB state before the user changes anything.
+- `src/lib/sgtDateTime.ts` converts between stored UTC instants and the SGT
+  date/time strings used by `<input type="date">`/`<input type="time">` — a
+  fixed +8h shift, since Singapore and Malaysia are both UTC+8 year-round.
+- Records page (`RecordsPage.tsx`) folds in "Add Entry" (was a separate `/add`
+  route/nav item — now a toggle-open panel using `EntryForm.tsx`, same
+  Charging-Related/Other-Expenses branch pattern as before) and surfaces a
+  pencil-icon edit affordance per row (`EditSessionModal.tsx`) for both
+  completing in-progress sessions and editing already-complete ones.
 
 ## Architecture
 - `src/lib/dataApiClient.ts`: the `db` client (`@neondatabase/neon-js`, anonymous
@@ -123,6 +171,10 @@ calculations into TypeScript.
   logic into structured data for the Insights tab UI.
 - `src/lib/fx.ts`: historical FX rate lookup + fallback chain (see Business Rules).
 - `src/hooks/`: React Query hooks fetch+cache Neon Data API data; derive on read.
+  `useChargingSessions` (complete-only, `DerivedSession[]`, for Dashboard/Insights)
+  and `useChargingSessionsRaw` (every row, `RecordRow[]`, for the Records page)
+  are separate hooks/query keys over the same table — edits/inserts invalidate
+  both.
 - `src/store/filterStore.ts`: Zustand store for dashboard filters + cross-filter
   state (donut click → filters all other charts), mirroring the old dashboard's
   global `crossFilterProvider` pattern.

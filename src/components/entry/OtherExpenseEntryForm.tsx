@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useQueryClient } from '@tanstack/react-query'
 import { db } from '../../lib/dataApiClient'
-import { EXPENSE_CATEGORIES } from '../../lib/constants'
+import { EXPENSE_CATEGORIES, PAID_BY_OPTIONS } from '../../lib/constants'
 import { useDistinctValues } from '../../hooks/useDistinctValues'
 import { OTHER_EXPENSES_QUERY_KEY } from '../../hooks/useOtherExpenses'
 import FormField, { inputClass } from './FormField'
@@ -25,20 +25,27 @@ export default function OtherExpenseEntryForm() {
   const queryClient = useQueryClient()
   const [status, setStatus] = useState<{ type: 'idle' | 'success' | 'error'; message?: string }>({ type: 'idle' })
   const paymentMethods = useDistinctValues('other_expenses', 'payment_method')
-  const paidBys = useDistinctValues('other_expenses', 'paid_by')
 
   const {
     register,
     handleSubmit,
     reset,
     watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema) as Resolver<FormValues>,
-    defaultValues: { category: EXPENSE_CATEGORIES[0] },
+    defaultValues: { category: EXPENSE_CATEGORIES[0], paidBy: PAID_BY_OPTIONS[0] },
   })
 
   const category = watch('category')
+
+  const onBlurRound2dp = (e: React.FocusEvent<HTMLInputElement>) => {
+    const v = Number(e.target.value)
+    if (!Number.isFinite(v)) return
+    const rounded = Math.round(v * 100) / 100
+    if (rounded !== v) setValue('amountSgd', rounded, { shouldValidate: true })
+  }
 
   const onSubmit = handleSubmit(async (values) => {
     setStatus({ type: 'idle' })
@@ -48,7 +55,7 @@ export default function OtherExpenseEntryForm() {
       const row: NewOtherExpenseRow = {
         expense_date: values.expenseDate,
         category: resolvedCategory,
-        amount_sgd: values.amountSgd,
+        amount_sgd: Math.round(values.amountSgd * 100) / 100,
         payment_method: values.paymentMethod,
         paid_by: values.paidBy,
       }
@@ -58,7 +65,7 @@ export default function OtherExpenseEntryForm() {
 
       await queryClient.invalidateQueries({ queryKey: OTHER_EXPENSES_QUERY_KEY })
       setStatus({ type: 'success', message: 'Saved.' })
-      reset({ category: EXPENSE_CATEGORIES[0] })
+      reset({ category: EXPENSE_CATEGORIES[0], paidBy: PAID_BY_OPTIONS[0] })
     } catch (err) {
       setStatus({ type: 'error', message: err instanceof Error ? err.message : 'Failed to save. Please try again.' })
     }
@@ -88,7 +95,7 @@ export default function OtherExpenseEntryForm() {
         </FormField>
 
         <FormField label="Amount Paid (SGD)" error={errors.amountSgd?.message}>
-          <input type="number" step="0.01" min="0" className={inputClass} {...register('amountSgd')} />
+          <input type="number" step="0.01" min="0" className={inputClass} {...register('amountSgd')} onBlur={onBlurRound2dp} />
         </FormField>
 
         <FormField label="Payment Method" error={errors.paymentMethod?.message}>
@@ -101,12 +108,13 @@ export default function OtherExpenseEntryForm() {
         </FormField>
 
         <FormField label="Paid By" error={errors.paidBy?.message}>
-          <input type="text" list="expense-paidby-options" className={inputClass} {...register('paidBy')} />
-          <datalist id="expense-paidby-options">
-            {(paidBys.data ?? []).map((v) => (
-              <option key={v} value={v} />
+          <select className={inputClass} {...register('paidBy')}>
+            {PAID_BY_OPTIONS.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
             ))}
-          </datalist>
+          </select>
         </FormField>
       </div>
 

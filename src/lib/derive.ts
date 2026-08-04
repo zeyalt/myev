@@ -2,7 +2,8 @@
 // bot/app.py (`fetch_data`, `compute_energy_consumption`) and bot/dashboard.html
 // (`processData`). All UI components consume DerivedSession[]/DerivedExpense[],
 // never raw database rows.
-import type { ChargingSessionRow, OtherExpenseRow, DerivedSession, DerivedExpense } from './types'
+import { isCompleteSession } from './types'
+import type { ChargingSessionRow, OtherExpenseRow, DerivedSession, DerivedExpense, RecordRow } from './types'
 
 export function toSgd(amount: number, fxRateToSgd: number): number {
   return amount * fxRateToSgd
@@ -39,9 +40,16 @@ export function deltaPct(cur: number, prev: number): DeltaResult {
  * Transforms raw charging_sessions rows into DerivedSession[], sorted by start
  * time ascending, with distance and (raw, unfiltered) energy-consumption fields
  * computed between consecutive sessions.
+ *
+ * In-progress ("quick start") sessions — created with only the fields known
+ * before charging begins, not yet completed — are excluded here, since cost/
+ * energy derivation is meaningless without an end time, kWh, etc. They still
+ * show up on the Records page via deriveRecordRows, just not in dashboard
+ * KPIs/charts or Insights until completed.
  */
 export function deriveSessions(rows: ChargingSessionRow[]): DerivedSession[] {
   const base = rows
+    .filter(isCompleteSession)
     .map((r): Omit<DerivedSession, 'distance' | 'energyKwhPer100km' | 'energyBattPer100km' | 'distToNext'> => {
       const startAt = new Date(r.start_at)
       const endAt = new Date(r.end_at)
@@ -58,6 +66,8 @@ export function deriveSessions(rows: ChargingSessionRow[]): DerivedSession[] {
         id: r.id,
         startAt,
         endAt,
+        idleStartAt: r.idle_start_at ? new Date(r.idle_start_at) : null,
+        idleEndAt: r.idle_end_at ? new Date(r.idle_end_at) : null,
         durationHours,
         kwh: r.kwh,
         odometerKm: r.odometer_km,
@@ -78,6 +88,11 @@ export function deriveSessions(rows: ChargingSessionRow[]): DerivedSession[] {
         paidBy: r.paid_by,
         currency: r.currency,
         monthKey: monthKey(startAt),
+        rawCost: r.cost,
+        rawRebate: r.rebate,
+        rawIdleFees: r.idle_fees,
+        fxRateToSgd: r.fx_rate_to_sgd,
+        fxRateSource: r.fx_rate_source,
       }
     })
     .sort((a, b) => a.startAt.getTime() - b.startAt.getTime())
@@ -107,6 +122,53 @@ export function deriveSessions(rows: ChargingSessionRow[]): DerivedSession[] {
       distToNext: dist,
     }
   })
+}
+
+/**
+ * Transforms raw charging_sessions rows into RecordRow[] for the Records
+ * page — preserves EVERY row, including in-progress ones deriveSessions
+ * excludes, with nullable fields wherever the underlying data isn't known
+ * yet. Sorted by start time descending (most recent first), since the
+ * primary use case is finding a just-started session to complete.
+ */
+export function deriveRecordRows(rows: ChargingSessionRow[]): RecordRow[] {
+  return rows
+    .map((r): RecordRow => {
+      const complete = isCompleteSession(r)
+      const grossCost = r.cost !== null ? toSgd(r.cost, r.fx_rate_to_sgd) : null
+      const rebateSgd = toSgd(r.rebate, r.fx_rate_to_sgd)
+      const netCost = grossCost !== null ? grossCost - rebateSgd : null
+      const costPerKwh = grossCost !== null && r.kwh !== null && r.kwh > 0 ? grossCost / r.kwh : null
+
+      return {
+        id: r.id,
+        isComplete: complete,
+        startAt: new Date(r.start_at),
+        endAt: r.end_at ? new Date(r.end_at) : null,
+        idleStartAt: r.idle_start_at ? new Date(r.idle_start_at) : null,
+        idleEndAt: r.idle_end_at ? new Date(r.idle_end_at) : null,
+        kwh: r.kwh,
+        odometerKm: r.odometer_km,
+        battBefore: r.batt_before_pct,
+        battAfter: r.batt_after_pct,
+        currency: r.currency,
+        rawCost: r.cost,
+        rawRebate: r.rebate,
+        rawIdleFees: r.idle_fees,
+        fxRateToSgd: r.fx_rate_to_sgd,
+        fxRateSource: r.fx_rate_source,
+        grossCost,
+        netCost,
+        costPerKwh,
+        country: r.country,
+        chargingType: r.charging_type,
+        location: r.location,
+        provider: r.provider,
+        subscriptionPlan: r.subscription_plan,
+        paidBy: r.paid_by,
+      }
+    })
+    .sort((a, b) => b.startAt.getTime() - a.startAt.getTime())
 }
 
 export function deriveExpenses(rows: OtherExpenseRow[]): DerivedExpense[] {

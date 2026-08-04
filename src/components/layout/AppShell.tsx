@@ -4,8 +4,8 @@ import clsx from 'clsx'
 import OfflineBanner from './OfflineBanner'
 
 const navItems = [
+  { to: '/records', label: 'Records' },
   { to: '/', label: 'Dashboard' },
-  { to: '/add', label: 'Add Entry' },
   { to: '/insights', label: 'Insights' },
 ]
 

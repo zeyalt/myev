@@ -8,6 +8,8 @@ function row(overrides: Partial<ChargingSessionRow>): ChargingSessionRow {
     created_at: new Date().toISOString(),
     start_at: '2026-01-01T08:00:00Z',
     end_at: '2026-01-01T09:00:00Z',
+    idle_start_at: null,
+    idle_end_at: null,
     kwh: 10,
     odometer_km: 1000,
     batt_before_pct: 20,
