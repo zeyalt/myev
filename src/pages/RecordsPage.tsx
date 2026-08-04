@@ -3,7 +3,9 @@ import { useQueryClient } from '@tanstack/react-query'
 import { db } from '../lib/dataApiClient'
 import { useChargingSessionsRaw, CHARGING_SESSIONS_RAW_QUERY_KEY } from '../hooks/useChargingSessionsRaw'
 import { CHARGING_SESSIONS_QUERY_KEY } from '../hooks/useChargingSessions'
+import { useOtherExpenses } from '../hooks/useOtherExpenses'
 import RecordsTable from '../components/table/RecordsTable'
+import ExpensesRecordsTable from '../components/table/ExpensesRecordsTable'
 import EntryForm from '../components/entry/EntryForm'
 import EditSessionModal from '../components/entry/EditSessionModal'
 import ConfirmDeleteModal from '../components/table/ConfirmDeleteModal'
@@ -12,6 +14,7 @@ import type { RecordRow } from '../lib/types'
 export default function RecordsPage() {
   const queryClient = useQueryClient()
   const { data, isLoading, isError } = useChargingSessionsRaw()
+  const expensesQuery = useOtherExpenses()
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingRecord, setEditingRecord] = useState<RecordRow | null>(null)
   const [deletingRecord, setDeletingRecord] = useState<RecordRow | null>(null)
@@ -54,6 +57,14 @@ export default function RecordsPage() {
         <div className="py-24 text-center text-red">Couldn't load records from Neon.</div>
       ) : (
         <RecordsTable sessions={data ?? []} onEdit={setEditingRecord} onRequestDelete={setDeletingRecord} />
+      )}
+
+      {expensesQuery.isLoading ? (
+        <div className="py-24 text-center text-slate">Loading expenses…</div>
+      ) : expensesQuery.isError ? (
+        <div className="py-24 text-center text-red">Couldn't load expenses from Neon.</div>
+      ) : (
+        <ExpensesRecordsTable expenses={expensesQuery.data ?? []} />
       )}
 
       {editingRecord && <EditSessionModal record={editingRecord} onClose={() => setEditingRecord(null)} />}

@@ -4,8 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useQueryClient } from '@tanstack/react-query'
 import { db } from '../../lib/dataApiClient'
-import { EXPENSE_CATEGORIES, PAID_BY_OPTIONS } from '../../lib/constants'
-import { useDistinctValues } from '../../hooks/useDistinctValues'
+import { EXPENSE_CATEGORIES, PAID_BY_OPTIONS, PAYMENT_METHODS } from '../../lib/constants'
 import { OTHER_EXPENSES_QUERY_KEY } from '../../hooks/useOtherExpenses'
 import FormField, { inputClass } from './FormField'
 import type { NewOtherExpenseRow } from '../../lib/types'
@@ -15,16 +14,29 @@ const schema = z.object({
   categoryOther: z.string().optional(),
   expenseDate: z.string().min(1, 'Required'),
   amountSgd: z.coerce.number().min(0, 'Must be >= 0'),
-  paymentMethod: z.string().min(1, 'Required'),
-  paidBy: z.string().min(1, 'Required'),
+  paymentMethod: z.enum(PAYMENT_METHODS),
+  paymentMethodOther: z.string().optional(),
+  paidBy: z.enum(PAID_BY_OPTIONS),
 })
 
 type FormValues = z.infer<typeof schema>
 
+// A single source of truth for "blank form" — reused for both the initial
+// mount and the post-save reset, so every field (not just the ones with
+// non-empty defaults) is guaranteed to clear after saving.
+const BLANK_DEFAULTS: FormValues = {
+  category: EXPENSE_CATEGORIES[0],
+  categoryOther: '',
+  expenseDate: '',
+  amountSgd: 0,
+  paymentMethod: PAYMENT_METHODS[0],
+  paymentMethodOther: '',
+  paidBy: PAID_BY_OPTIONS[0],
+}
+
 export default function OtherExpenseEntryForm() {
   const queryClient = useQueryClient()
   const [status, setStatus] = useState<{ type: 'idle' | 'success' | 'error'; message?: string }>({ type: 'idle' })
-  const paymentMethods = useDistinctValues('other_expenses', 'payment_method')
 
   const {
     register,
@@ -35,10 +47,11 @@ export default function OtherExpenseEntryForm() {
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema) as Resolver<FormValues>,
-    defaultValues: { category: EXPENSE_CATEGORIES[0], paidBy: PAID_BY_OPTIONS[0] },
+    defaultValues: BLANK_DEFAULTS,
   })
 
   const category = watch('category')
+  const paymentMethod = watch('paymentMethod')
 
   const onBlurRound2dp = (e: React.FocusEvent<HTMLInputElement>) => {
     const v = Number(e.target.value)
@@ -51,12 +64,14 @@ export default function OtherExpenseEntryForm() {
     setStatus({ type: 'idle' })
     try {
       const resolvedCategory = values.category === 'Other' ? values.categoryOther?.trim() || 'Other' : values.category
+      const resolvedPaymentMethod =
+        values.paymentMethod === 'Other' ? values.paymentMethodOther?.trim() || 'Other' : values.paymentMethod
 
       const row: NewOtherExpenseRow = {
         expense_date: values.expenseDate,
         category: resolvedCategory,
         amount_sgd: Math.round(values.amountSgd * 100) / 100,
-        payment_method: values.paymentMethod,
+        payment_method: resolvedPaymentMethod,
         paid_by: values.paidBy,
       }
 
@@ -65,7 +80,7 @@ export default function OtherExpenseEntryForm() {
 
       await queryClient.invalidateQueries({ queryKey: OTHER_EXPENSES_QUERY_KEY })
       setStatus({ type: 'success', message: 'Saved.' })
-      reset({ category: EXPENSE_CATEGORIES[0], paidBy: PAID_BY_OPTIONS[0] })
+      reset(BLANK_DEFAULTS)
     } catch (err) {
       setStatus({ type: 'error', message: err instanceof Error ? err.message : 'Failed to save. Please try again.' })
     }
@@ -99,13 +114,20 @@ export default function OtherExpenseEntryForm() {
         </FormField>
 
         <FormField label="Payment Method" error={errors.paymentMethod?.message}>
-          <input type="text" list="payment-method-options" className={inputClass} {...register('paymentMethod')} />
-          <datalist id="payment-method-options">
-            {(paymentMethods.data ?? []).map((v) => (
-              <option key={v} value={v} />
+          <select className={inputClass} {...register('paymentMethod')}>
+            {PAYMENT_METHODS.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
             ))}
-          </datalist>
+          </select>
         </FormField>
+
+        {paymentMethod === 'Other' && (
+          <FormField label="Specify Payment Method" error={errors.paymentMethodOther?.message}>
+            <input type="text" className={inputClass} {...register('paymentMethodOther')} />
+          </FormField>
+        )}
 
         <FormField label="Paid By" error={errors.paidBy?.message}>
           <select className={inputClass} {...register('paidBy')}>

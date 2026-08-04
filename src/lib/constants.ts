@@ -35,6 +35,11 @@ export type SubscriptionPlan = (typeof SUBSCRIPTION_PLANS)[number]
 export const PAID_BY_OPTIONS = ['Zeya & Atiqah', 'Zeya', 'Atiqah'] as const
 export type PaidBy = (typeof PAID_BY_OPTIONS)[number]
 
+// 'Debit/Credit Card' and 'NETS' match every historical value from the IM6
+// export; 'Cash' added for coverage, 'Other' as a free-text fallback.
+export const PAYMENT_METHODS = ['Debit/Credit Card', 'NETS', 'Cash', 'Other'] as const
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number]
+
 // Shared across all provider-related charts, matching dashboard.html's providerColors
 export const PROVIDER_COLORS = [
   '#00D4FF',
