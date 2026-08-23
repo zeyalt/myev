@@ -51,7 +51,7 @@ const schema = z
     currency: z.union([z.enum(CURRENCIES), z.literal('')]).optional(),
     rebate: optionalNumber(),
     idleFees: optionalNumber(),
-    paidBy: z.union([z.enum(PAID_BY_OPTIONS), z.literal('')]).optional(),
+    paidBy: z.enum(PAID_BY_OPTIONS),
   })
   .refine((d) => !(d.endDate && d.endTime) || !d.startDate || !d.startTime || fromSgtParts(d.endDate, d.endTime)! > fromSgtParts(d.startDate, d.startTime)!, {
     message: 'End time must be after start time',
@@ -110,7 +110,7 @@ function recordToDefaults(r: RecordRow): Partial<FormValues> {
     currency: r.currency ?? '',
     rebate: r.rawRebate,
     idleFees: r.rawIdleFees,
-    paidBy: (r.paidBy as FormValues['paidBy']) ?? '',
+    paidBy: (r.paidBy as FormValues['paidBy']) ?? PAID_BY_OPTIONS[0],
   }
 }
 
@@ -144,6 +144,10 @@ export default function ChargingSessionForm({
             country: 'Singapore',
             chargingType: 'AC',
             subscriptionPlan: 'None',
+            currency: 'SGD',
+            rebate: 0,
+            idleFees: 0,
+            paidBy: PAID_BY_OPTIONS[0],
           },
   })
 
@@ -151,6 +155,8 @@ export default function ChargingSessionForm({
   const location = watch('location')
   const provider = watch('provider')
   const subscriptionPlan = watch('subscriptionPlan')
+
+  const countryRegister = register('country')
 
   const locationOptions = (locations.data ?? []).slice(0, MAX_TOP_OPTIONS)
   const providerOptions = (providers.data ?? []).slice(0, MAX_TOP_OPTIONS)
@@ -239,7 +245,15 @@ export default function ChargingSessionForm({
         if (error) throw error
         await invalidateSessions()
         setStatus({ type: 'success', message: 'Session started — complete it later from Records.' })
-        reset({ country: 'Singapore', chargingType: 'AC', subscriptionPlan: 'None' } as Partial<FormValues>)
+        reset({
+          country: 'Singapore',
+          chargingType: 'AC',
+          subscriptionPlan: 'None',
+          currency: 'SGD',
+          rebate: 0,
+          idleFees: 0,
+          paidBy: PAID_BY_OPTIONS[0],
+        } as Partial<FormValues>)
       } else {
         const updateRow: UpdateChargingSessionRow = row
         const { error } = await db.from('charging_sessions').update(updateRow).eq('id', record!.id)
@@ -284,7 +298,14 @@ export default function ChargingSessionForm({
           />
         </FormField>
         <FormField label="Country" error={errors.country?.message}>
-          <select className={inputClass} {...register('country')}>
+          <select
+            className={inputClass}
+            {...countryRegister}
+            onChange={(e) => {
+              countryRegister.onChange(e)
+              setValue('currency', e.target.value === 'Malaysia' ? 'MYR' : 'SGD')
+            }}
+          >
             {COUNTRIES.map((c) => (
               <option key={c} value={c}>
                 {c}
@@ -408,7 +429,6 @@ export default function ChargingSessionForm({
         </FormField>
         <FormField label="Paid By" error={errors.paidBy?.message}>
           <select className={inputClass} {...register('paidBy')}>
-            <option value="">—</option>
             {PAID_BY_OPTIONS.map((v) => (
               <option key={v} value={v}>
                 {v}
