@@ -7,6 +7,7 @@ const navItems = [
   { to: '/records', label: 'Records', icon: RecordsIcon },
   { to: '/', label: 'Dashboard', icon: DashboardIcon },
   { to: '/insights', label: 'Insights', icon: InsightsIcon },
+  { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ]
 
 export default function AppShell({ children }: { children: ReactNode }) {
@@ -91,6 +92,16 @@ function InsightsIcon({ active }: { active: boolean }) {
     <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth={active ? 2 : 1.5}>
       <path d="M12 3a6 6 0 0 0-3.5 10.9c.5.4.8 1 .8 1.6v.5h5.4v-.5c0-.6.3-1.2.8-1.6A6 6 0 0 0 12 3Z" />
       <path d="M9.5 19h5M10.5 21.5h3" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function SettingsIcon({ active }: { active: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth={active ? 2 : 1.5}>
+      <path d="M4 7h10M18 7h2M4 17h2M10 17h10" strokeLinecap="round" />
+      <circle cx="16" cy="7" r="2" />
+      <circle cx="8" cy="17" r="2" />
     </svg>
   )
 }

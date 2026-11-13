@@ -151,11 +151,29 @@ in one go.**
 - `src/lib/sgtDateTime.ts` converts between stored UTC instants and the SGT
   date/time strings used by `<input type="date">`/`<input type="time">` — a
   fixed +8h shift, since Singapore and Malaysia are both UTC+8 year-round.
-- Records page (`RecordsPage.tsx`) folds in "Add Entry" (was a separate `/add`
-  route/nav item — now a toggle-open panel using `EntryForm.tsx`, same
-  Charging-Related/Other-Expenses branch pattern as before) and surfaces a
+- Records page (`RecordsPage.tsx`) has top-level **Charging-Related / Other Expenses
+  tabs**; the active tab decides both which table is shown and which form
+  "+ Add Entry" opens (`EntryForm` takes a `branch` prop; switching tabs closes
+  the form). FX rate/source are stored but hidden from the charging table. It
+  folds in "Add Entry" (was a separate `/add` route/nav item) and surfaces a
   pencil-icon edit affordance per row (`EditSessionModal.tsx`) for both
   completing in-progress sessions and editing already-complete ones.
+
+## Charging form automations (`ChargingSessionForm.tsx`)
+- **Subscription cost**: `src/lib/subscription.ts` — cost = `kwh / plan.kwh * plan.priceSgd`.
+  Plans (name, kWh bundle, SGD price) live in the **`subscription_plans` Neon table**
+  (`neon/05_subscription_plans.sql`, seeded with the original plans) and are managed on
+  the **Settings page** (`/settings`: add / edit / delete; renaming also renames the plan
+  on past `charging_sessions` rows, deleting leaves history untouched). `null` kWh/price
+  ⇒ no auto-fill. If the table can't be read (05 not run), the form falls back to
+  `FALLBACK_PLANS`. Fills the Cost field only while kWh is being edited, Cost hasn't been
+  typed by the user, and currency is SGD. Effect deps must stay primitives/memoized (an
+  object dep caused an infinite render loop).
+- **Plan auto-select** (create mode only): newest past session at the same
+  location + provider, else newest at the provider (`inferSubscriptionPlan`,
+  `usePastPlans`). Stops once the user picks a plan.
+- **Idle fields** (idle start/end, idle fees) sit behind an off-by-default toggle;
+  off ⇒ saved as `idle_*_at = null`, `idle_fees = 0`. On when editing a row with idle data.
 
 ## Architecture
 - `src/lib/dataApiClient.ts`: the `db` client (`@neondatabase/neon-js`, anonymous
@@ -217,9 +235,11 @@ role — follow this exact sequence:
    copy the **Auth URL** (`https://<endpoint>.neonauth.<region>.aws.neon.tech/<db>/auth`).
 5. Run `neon/02_grants.sql` — grants the `anonymous` role (now provisioned by step 3)
    select/insert on both tables and creates its RLS policies.
+5b. Run `neon/04_editable_sessions.sql` (existing DBs) and `neon/05_subscription_plans.sql`, then
+   "Refresh schema cache" on the Data API page.
 6. `cp .env.example .env.local` and set `VITE_NEON_DATA_API_URL` (from step 3) and
    `VITE_NEON_AUTH_URL` (from step 4).
-7. `npm install && npm run dev`. Verify with Playwright/DevTools that `/`, `/add`,
+7. `npm install && npm run dev`. Verify with Playwright/DevTools that `/`, `/records`,
    and `/insights` load with no console errors, and that submitting a test entry on
-   `/add` shows "Saved." and appears on the Dashboard — this confirms the anonymous
+   `/records` shows "Saved." and appears on the Dashboard — this confirms the anonymous
    JWT flow is actually working end-to-end, not just that the URLs are reachable.

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import clsx from 'clsx'
 import { useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -6,8 +7,11 @@ import { useQueryClient } from '@tanstack/react-query'
 import { db } from '../../lib/dataApiClient'
 import { getHistoricalFxRate } from '../../lib/fx'
 import { fromSgtParts, toSgtParts } from '../../lib/sgtDateTime'
-import { CURRENCIES, COUNTRIES, CHARGING_TYPES, SUBSCRIPTION_PLANS, PAID_BY_OPTIONS } from '../../lib/constants'
+import { CURRENCIES, COUNTRIES, CHARGING_TYPES, PAID_BY_OPTIONS } from '../../lib/constants'
 import { useValuesByFrequency } from '../../hooks/useValuesByFrequency'
+import { usePastPlans } from '../../hooks/usePastPlans'
+import { useSubscriptionPlans } from '../../hooks/useSubscriptionPlans'
+import { computeSubscriptionCost, inferSubscriptionPlan, FALLBACK_PLANS } from '../../lib/subscription'
 import { CHARGING_SESSIONS_QUERY_KEY } from '../../hooks/useChargingSessions'
 import { CHARGING_SESSIONS_RAW_QUERY_KEY } from '../../hooks/useChargingSessionsRaw'
 import FormField, { inputClass } from './FormField'
@@ -127,6 +131,21 @@ export default function ChargingSessionForm({
   const [status, setStatus] = useState<{ type: 'idle' | 'success' | 'error'; message?: string }>({ type: 'idle' })
   const locations = useValuesByFrequency('charging_sessions', 'location')
   const providers = useValuesByFrequency('charging_sessions', 'provider')
+  const pastPlans = usePastPlans()
+  const plansQuery = useSubscriptionPlans()
+  // Plans are managed in Settings; fall back to the built-in list if the table isn't available.
+  const plans = useMemo(() => plansQuery.data ?? FALLBACK_PLANS, [plansQuery.data])
+  // Keep a record's own plan selectable even if it was since renamed/deleted in Settings.
+  const subscriptionPlanOptions = useMemo(() => {
+    const names = ['None', ...plans.map((p) => p.name)]
+    if (record && !names.includes(record.subscriptionPlan)) names.push(record.subscriptionPlan)
+    return names
+  }, [plans, record])
+  // Idle fields are only relevant when the charger actually billed idle time, so
+  // they sit behind a toggle (off by default; on when editing a row that has idle data).
+  const [hasIdle, setHasIdle] = useState(
+    mode === 'edit' && !!record && (!!record.idleStartAt || !!record.idleEndAt || record.rawIdleFees > 0),
+  )
 
   const {
     register,
@@ -160,7 +179,6 @@ export default function ChargingSessionForm({
 
   const locationOptions = (locations.data ?? []).slice(0, MAX_TOP_OPTIONS)
   const providerOptions = (providers.data ?? []).slice(0, MAX_TOP_OPTIONS)
-  const subscriptionPlanOptions = SUBSCRIPTION_PLANS.filter((p) => p !== 'Other')
 
   useEffect(() => {
     if (mode !== 'create') return
@@ -170,6 +188,36 @@ export default function ChargingSessionForm({
     if (mode !== 'create') return
     if (providerOptions.length > 0 && !dirtyFields.provider) setValue('provider', providerOptions[0])
   }, [mode, providerOptions, dirtyFields.provider, setValue])
+
+  // Auto-select the plan last used at this location + provider (new sessions only,
+  // and only until the user picks a plan themselves).
+  useEffect(() => {
+    if (mode !== 'create' || dirtyFields.subscriptionPlan || !pastPlans.data) return
+    if (!location || location === OTHER_SENTINEL || !provider || provider === OTHER_SENTINEL) return
+    const plan = inferSubscriptionPlan(pastPlans.data, location, provider)
+    if (!plan) return
+    if (subscriptionPlanOptions.includes(plan)) {
+      setValue('subscriptionPlan', plan)
+    } else {
+      setValue('subscriptionPlan', OTHER_SENTINEL)
+      setValue('subscriptionPlanOther', plan)
+    }
+  }, [mode, pastPlans.data, location, provider, dirtyFields.subscriptionPlan, subscriptionPlanOptions, setValue])
+
+  // Subscription plans bill pro-rata against the prepaid bundle, so derive the cost
+  // from kWh. Only while the user is entering kWh and hasn't typed a cost themselves.
+  const kwhRaw = watch('kwh')
+  const subscriptionCost =
+    currency === 'SGD' && kwhRaw !== undefined && String(kwhRaw) !== ''
+      ? computeSubscriptionCost(plans, subscriptionPlan, Number(kwhRaw))
+      : null
+  // Depend on the primitive, not the object: a fresh object each render would re-fire this
+  // effect after every setValue-triggered re-render (infinite loop).
+  const autoCost = subscriptionCost?.cost
+  useEffect(() => {
+    if (!dirtyFields.kwh || dirtyFields.cost || autoCost === undefined) return
+    setValue('cost', autoCost, { shouldValidate: true })
+  }, [dirtyFields.kwh, dirtyFields.cost, autoCost, setValue])
 
   const onBlurClampPercent = (name: 'battBefore' | 'battAfter') => (e: React.FocusEvent<HTMLInputElement>) => {
     const v = Number(e.target.value)
@@ -196,8 +244,8 @@ export default function ChargingSessionForm({
     try {
       const startISO = fromSgtParts(values.startDate, values.startTime)!
       const endISO = fromSgtParts(values.endDate ?? '', values.endTime ?? '')
-      const idleStartISO = fromSgtParts(values.idleStartDate ?? '', values.idleStartTime ?? '')
-      const idleEndISO = fromSgtParts(values.idleEndDate ?? '', values.idleEndTime ?? '')
+      const idleStartISO = hasIdle ? fromSgtParts(values.idleStartDate ?? '', values.idleStartTime ?? '') : null
+      const idleEndISO = hasIdle ? fromSgtParts(values.idleEndDate ?? '', values.idleEndTime ?? '') : null
 
       const currencyValue = values.currency || null
       let fxRateToSgd = record?.fxRateToSgd ?? 1
@@ -228,7 +276,7 @@ export default function ChargingSessionForm({
         batt_after_pct: values.battAfter ?? null,
         cost: values.cost !== undefined ? round2dp(values.cost) : null,
         rebate: round2dp(values.rebate ?? 0),
-        idle_fees: round2dp(values.idleFees ?? 0),
+        idle_fees: hasIdle ? round2dp(values.idleFees ?? 0) : 0,
         currency: currencyValue,
         fx_rate_to_sgd: fxRateToSgd,
         fx_rate_source: fxRateSource as NewChargingSessionRow['fx_rate_source'],
@@ -254,6 +302,7 @@ export default function ChargingSessionForm({
           idleFees: 0,
           paidBy: PAID_BY_OPTIONS[0],
         } as Partial<FormValues>)
+        setHasIdle(false)
       } else {
         const updateRow: UpdateChargingSessionRow = row
         const { error } = await db.from('charging_sessions').update(updateRow).eq('id', record!.id)
@@ -347,7 +396,7 @@ export default function ChargingSessionForm({
         />
         <SelectWithOther
           label="Subscription Plan"
-          options={subscriptionPlanOptions as unknown as string[]}
+          options={subscriptionPlanOptions}
           error={errors.subscriptionPlan?.message}
           otherError={errors.subscriptionPlanOther?.message}
           showOther={subscriptionPlan === OTHER_SENTINEL}
@@ -366,22 +415,6 @@ export default function ChargingSessionForm({
           </FormField>
           <FormField label="End Time" error={errors.endTime?.message}>
             <input type="time" className={inputClass} {...register('endTime')} />
-          </FormField>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <FormField label="Idle Start Date" error={errors.idleStartDate?.message}>
-            <input type="date" className={inputClass} {...register('idleStartDate')} />
-          </FormField>
-          <FormField label="Idle Start Time" error={errors.idleStartTime?.message}>
-            <input type="time" className={inputClass} {...register('idleStartTime')} />
-          </FormField>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <FormField label="Idle End Date" error={errors.idleEndDate?.message}>
-            <input type="date" className={inputClass} {...register('idleEndDate')} />
-          </FormField>
-          <FormField label="Idle End Time" error={errors.idleEndTime?.message}>
-            <input type="time" className={inputClass} {...register('idleEndTime')} />
           </FormField>
         </div>
         <FormField label="Total kWh Charged" error={errors.kwh?.message}>
@@ -412,21 +445,16 @@ export default function ChargingSessionForm({
 
         <FormField label="Charging Cost" error={errors.cost?.message}>
           <input type="number" step="0.01" min="0" className={inputClass} {...register('cost')} onBlur={onBlurRound2dp('cost')} />
+          {subscriptionCost && !dirtyFields.cost && dirtyFields.kwh && (
+            <span className="text-[11px] text-cyan/80">
+              Auto: {Number(kwhRaw)} / {subscriptionCost.planKwh} kWh × ${subscriptionCost.planPrice} — type to override
+            </span>
+          )}
         </FormField>
         <FormField label="Rebate, if any" error={errors.rebate?.message}>
           <input type="number" step="0.01" min="0" className={inputClass} {...register('rebate')} onBlur={onBlurRound2dp('rebate')} />
         </FormField>
 
-        <FormField label="Idle Fees" error={errors.idleFees?.message}>
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            className={inputClass}
-            {...register('idleFees')}
-            onBlur={onBlurRound2dp('idleFees')}
-          />
-        </FormField>
         <FormField label="Paid By" error={errors.paidBy?.message}>
           <select className={inputClass} {...register('paidBy')}>
             {PAID_BY_OPTIONS.map((v) => (
@@ -436,6 +464,63 @@ export default function ChargingSessionForm({
             ))}
           </select>
         </FormField>
+
+        <div className="sm:col-span-2 rounded-lg border border-border-subtle p-3 flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <span className="text-sm font-medium text-white">Idle fees applied</span>
+              <p className="text-xs text-slate/70">Only if the charger billed you for staying plugged in after charging.</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={hasIdle}
+              aria-label="Idle fees applied"
+              onClick={() => setHasIdle((v) => !v)}
+              className={clsx(
+                'relative w-11 h-6 shrink-0 rounded-full transition-colors',
+                hasIdle ? 'bg-cyan' : 'bg-white/15',
+              )}
+            >
+              <span
+                className={clsx(
+                  'absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform',
+                  hasIdle && 'translate-x-5',
+                )}
+              />
+            </button>
+          </div>
+          {hasIdle && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-2">
+                <FormField label="Idle Start Date" error={errors.idleStartDate?.message}>
+                  <input type="date" className={inputClass} {...register('idleStartDate')} />
+                </FormField>
+                <FormField label="Idle Start Time" error={errors.idleStartTime?.message}>
+                  <input type="time" className={inputClass} {...register('idleStartTime')} />
+                </FormField>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <FormField label="Idle End Date" error={errors.idleEndDate?.message}>
+                  <input type="date" className={inputClass} {...register('idleEndDate')} />
+                </FormField>
+                <FormField label="Idle End Time" error={errors.idleEndTime?.message}>
+                  <input type="time" className={inputClass} {...register('idleEndTime')} />
+                </FormField>
+              </div>
+              <FormField label="Idle Fees" error={errors.idleFees?.message}>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className={inputClass}
+                  {...register('idleFees')}
+                  onBlur={onBlurRound2dp('idleFees')}
+                />
+              </FormField>
+            </div>
+          )}
+        </div>
       </div>
 
       {currency === 'MYR' && (

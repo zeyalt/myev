@@ -66,6 +66,14 @@ export interface OtherExpenseRow {
   paid_by: string
 }
 
+export interface SubscriptionPlanRow {
+  id: string
+  created_at: string
+  name: string
+  kwh: number | null
+  price_sgd: number | null
+}
+
 export type NewOtherExpenseRow = Omit<OtherExpenseRow, 'id' | 'created_at'>
 
 // Derived shapes, computed by src/lib/derive.ts. All UI components consume these,

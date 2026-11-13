@@ -20,18 +20,6 @@ export type Country = (typeof COUNTRIES)[number]
 export const CHARGING_TYPES = ['AC', 'DC'] as const
 export type ChargingType = (typeof CHARGING_TYPES)[number]
 
-export const SUBSCRIPTION_PLANS = [
-  'None',
-  '[Shell Recharge] Eurokars MG 500kWh',
-  '[Charge+] Nano 55kWh',
-  '[Charge+] Ultra-Lite 125kWh',
-  '[Charge+] Lite 190kWh',
-  '[Charge+] Regular 360kWh',
-  '[Charge+] Plus 480kWh',
-  'Other',
-] as const
-export type SubscriptionPlan = (typeof SUBSCRIPTION_PLANS)[number]
-
 export const PAID_BY_OPTIONS = ['Zeya & Atiqah', 'Zeya', 'Atiqah'] as const
 export type PaidBy = (typeof PAID_BY_OPTIONS)[number]
 

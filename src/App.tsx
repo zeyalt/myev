@@ -3,6 +3,7 @@ import AppShell from './components/layout/AppShell'
 import DashboardPage from './pages/DashboardPage'
 import InsightsPage from './pages/InsightsPage'
 import RecordsPage from './pages/RecordsPage'
+import SettingsPage from './pages/SettingsPage'
 
 function App() {
   return (
@@ -11,6 +12,7 @@ function App() {
         <Route path="/records" element={<RecordsPage />} />
         <Route path="/" element={<DashboardPage />} />
         <Route path="/insights" element={<InsightsPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         {/* Add Entry folded into Records; redirect old bookmarks/links. */}
         <Route path="/add" element={<Navigate to="/records" replace />} />
       </Routes>

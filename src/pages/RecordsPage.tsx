@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import clsx from 'clsx'
 import { useQueryClient } from '@tanstack/react-query'
 import { db } from '../lib/dataApiClient'
 import { useChargingSessionsRaw, CHARGING_SESSIONS_RAW_QUERY_KEY } from '../hooks/useChargingSessionsRaw'
@@ -6,7 +7,7 @@ import { CHARGING_SESSIONS_QUERY_KEY } from '../hooks/useChargingSessions'
 import { useOtherExpenses } from '../hooks/useOtherExpenses'
 import RecordsTable from '../components/table/RecordsTable'
 import ExpensesRecordsTable from '../components/table/ExpensesRecordsTable'
-import EntryForm from '../components/entry/EntryForm'
+import EntryForm, { type Branch } from '../components/entry/EntryForm'
 import EditSessionModal from '../components/entry/EditSessionModal'
 import ConfirmDeleteModal from '../components/table/ConfirmDeleteModal'
 import type { RecordRow } from '../lib/types'
@@ -15,6 +16,7 @@ export default function RecordsPage() {
   const queryClient = useQueryClient()
   const { data, isLoading, isError } = useChargingSessionsRaw()
   const expensesQuery = useOtherExpenses()
+  const [tab, setTab] = useState<Branch>('Charging-Related')
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingRecord, setEditingRecord] = useState<RecordRow | null>(null)
   const [deletingRecord, setDeletingRecord] = useState<RecordRow | null>(null)
@@ -38,7 +40,11 @@ export default function RecordsPage() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-white">Records</h1>
-          <p className="text-sm text-slate mt-1">Every charging session, unfiltered, with raw database fields.</p>
+          <p className="text-sm text-slate mt-1">
+            {tab === 'Charging-Related'
+              ? 'Every charging session, unfiltered, with raw database fields.'
+              : 'Every non-charging expense.'}
+          </p>
         </div>
         <button
           type="button"
@@ -49,17 +55,38 @@ export default function RecordsPage() {
         </button>
       </div>
 
-      {showAddForm && <EntryForm />}
+      <div role="tablist" className="flex items-center gap-0.5 rounded-lg border border-border-subtle bg-surface p-0.5">
+        {(['Charging-Related', 'Other Expenses'] as Branch[]).map((b) => (
+          <button
+            key={b}
+            type="button"
+            role="tab"
+            aria-selected={tab === b}
+            onClick={() => {
+              setTab(b)
+              setShowAddForm(false)
+            }}
+            className={clsx(
+              'flex-1 px-4 py-2 rounded-md text-sm font-medium transition-colors text-center',
+              tab === b ? 'bg-cyan/15 text-cyan' : 'text-slate hover:text-white',
+            )}
+          >
+            {b}
+          </button>
+        ))}
+      </div>
 
-      {isLoading ? (
-        <div className="py-24 text-center text-slate">Loading records…</div>
-      ) : isError ? (
-        <div className="py-24 text-center text-red">Couldn't load records from Neon.</div>
-      ) : (
-        <RecordsTable sessions={data ?? []} onEdit={setEditingRecord} onRequestDelete={setDeletingRecord} />
-      )}
+      {showAddForm && <EntryForm branch={tab} />}
 
-      {expensesQuery.isLoading ? (
+      {tab === 'Charging-Related' ? (
+        isLoading ? (
+          <div className="py-24 text-center text-slate">Loading records…</div>
+        ) : isError ? (
+          <div className="py-24 text-center text-red">Couldn't load records from Neon.</div>
+        ) : (
+          <RecordsTable sessions={data ?? []} onEdit={setEditingRecord} onRequestDelete={setDeletingRecord} />
+        )
+      ) : expensesQuery.isLoading ? (
         <div className="py-24 text-center text-slate">Loading expenses…</div>
       ) : expensesQuery.isError ? (
         <div className="py-24 text-center text-red">Couldn't load expenses from Neon.</div>

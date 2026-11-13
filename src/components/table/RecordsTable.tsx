@@ -107,8 +107,6 @@ export default function RecordsTable({
                   <Col>Raw Cost</Col>
                   <Col>Raw Rebate</Col>
                   <Col>Raw Idle Fees</Col>
-                  <Col>FX Rate</Col>
-                  <Col>FX Source</Col>
                   <Th label="Gross (SGD)" onClick={() => toggleSort('grossCost')} active={sortKey === 'grossCost'} desc={sortDesc} />
                   <Col>Net (SGD)</Col>
                   <Col>$/kWh</Col>
@@ -154,8 +152,6 @@ export default function RecordsTable({
                     <Td mono>{fmtOrDash(s.rawCost, 2)}</Td>
                     <Td mono>{fmtNumber(s.rawRebate, 2)}</Td>
                     <Td mono>{fmtNumber(s.rawIdleFees, 2)}</Td>
-                    <Td mono>{fmtNumber(s.fxRateToSgd, 5)}</Td>
-                    <Td>{s.fxRateSource}</Td>
                     <Td mono>{s.grossCost === null ? '—' : `$${fmtNumber(s.grossCost, 2)}`}</Td>
                     <Td mono>{s.netCost === null ? '—' : `$${fmtNumber(s.netCost, 2)}`}</Td>
                     <Td mono className="text-cyan">
